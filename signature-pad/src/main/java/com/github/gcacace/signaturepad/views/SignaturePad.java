@@ -109,33 +109,35 @@ public class SignaturePad extends View {
         });
     }
 
-    @Override
-    protected Parcelable onSaveInstanceState() {
-        try {
-            Bundle bundle = new Bundle();
-            bundle.putParcelable("superState", super.onSaveInstanceState());
-            if (this.mHasEditState == null || this.mHasEditState) {
-                this.mBitmapSavedState = this.getTransparentSignatureBitmap();
-            }
-            bundle.putParcelable("signatureBitmap", this.mBitmapSavedState);
-            return bundle;
-        } catch(Exception e) {
-            Log.w(TAG, String.format("error saving instance state: %s", e.getMessage()));
-            return super.onSaveInstanceState();
-        }
-    }
+    // TODO masc20200507. state should not be stored in bundle as it may exceed memory limit raising `TrasactionTooLargeException`
+    // https://github.com/gcacace/android-signaturepad/issues/114
+//    @Override
+//    protected Parcelable onSaveInstanceState() {
+//        try {
+//            Bundle bundle = new Bundle();
+//            bundle.putParcelable("superState", super.onSaveInstanceState());
+//            if (this.mHasEditState == null || this.mHasEditState) {
+//                this.mBitmapSavedState = this.getTransparentSignatureBitmap();
+//            }
+//            bundle.putParcelable("signatureBitmap", this.mBitmapSavedState);
+//            return bundle;
+//        } catch(Exception e) {
+//            Log.w(TAG, String.format("error saving instance state: %s", e.getMessage()));
+//            return super.onSaveInstanceState();
+//        }
+//    }
 
-    @Override
-    protected void onRestoreInstanceState(Parcelable state) {
-        if (state instanceof Bundle) {
-            Bundle bundle = (Bundle) state;
-            this.setSignatureBitmap((Bitmap) bundle.getParcelable("signatureBitmap"));
-            this.mBitmapSavedState = bundle.getParcelable("signatureBitmap");
-            state = bundle.getParcelable("superState");
-        }
-        this.mHasEditState = false;
-        super.onRestoreInstanceState(state);
-    }
+//    @Override
+//    protected void onRestoreInstanceState(Parcelable state) {
+//        if (state instanceof Bundle) {
+//            Bundle bundle = (Bundle) state;
+//            this.setSignatureBitmap((Bitmap) bundle.getParcelable("signatureBitmap"));
+//            this.mBitmapSavedState = bundle.getParcelable("signatureBitmap");
+//            state = bundle.getParcelable("superState");
+//        }
+//        this.mHasEditState = false;
+//        super.onRestoreInstanceState(state);
+//    }
 
     /**
      * Set the pen color from a given resource.
