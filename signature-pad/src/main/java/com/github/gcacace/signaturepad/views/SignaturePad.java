@@ -13,6 +13,8 @@ import android.graphics.RectF;
 import android.os.Bundle;
 import android.os.Parcelable;
 import android.util.AttributeSet;
+import android.util.Log;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewTreeObserver;
@@ -33,6 +35,8 @@ import static android.content.res.Configuration.ORIENTATION_PORTRAIT;
 import static android.content.res.Configuration.ORIENTATION_UNDEFINED;
 
 public class SignaturePad extends View {
+    private static final String TAG = SignaturePad.class.getName();
+
     //View state
     private List<TimedPoint> mPoints;
     private boolean mIsEmpty;
@@ -58,10 +62,8 @@ public class SignaturePad extends View {
     private OnSignedListener mOnSignedListener;
     private boolean mClearOnDoubleClick;
 
-    //Click values
-    private long mFirstClick;
-    private int mCountClick;
-    private static final int DOUBLE_CLICK_DELAY_MS = 200;
+    //Double click detector
+    private GestureDetector mGestureDetector;
 
     //Default attribute values
     private final int DEFAULT_ATTR_PEN_MIN_WIDTH_PX = 3;
@@ -110,31 +112,43 @@ public class SignaturePad extends View {
 
         clearView();
 
+        mGestureDetector = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                return onDoubleClick();
+            }
+        });
     }
 
-    @Override
-    protected Parcelable onSaveInstanceState() {
-        Bundle bundle = new Bundle();
-        bundle.putParcelable("superState", super.onSaveInstanceState());
-        if(this.mHasEditState == null || this.mHasEditState){
-            this.mBitmapSavedState = this.getTransparentSignatureBitmap();
-        }
-        bundle.putParcelable("signatureBitmap", this.mBitmapSavedState);
-        return bundle;
-    }
+    // TODO masc20200507. state should not be stored in bundle as it may exceed memory limit raising `TrasactionTooLargeException`
+    // https://github.com/gcacace/android-signaturepad/issues/114
+//    @Override
+//    protected Parcelable onSaveInstanceState() {
+//        try {
+//            Bundle bundle = new Bundle();
+//            bundle.putParcelable("superState", super.onSaveInstanceState());
+//            if (this.mHasEditState == null || this.mHasEditState) {
+//                this.mBitmapSavedState = this.getTransparentSignatureBitmap();
+//            }
+//            bundle.putParcelable("signatureBitmap", this.mBitmapSavedState);
+//            return bundle;
+//        } catch(Exception e) {
+//            Log.w(TAG, String.format("error saving instance state: %s", e.getMessage()));
+//            return super.onSaveInstanceState();
+//        }
+//    }
 
-    @Override
-    protected void onRestoreInstanceState(Parcelable state) {
-        if (state instanceof Bundle)
-        {
-            Bundle bundle = (Bundle) state;
-            this.setSignatureBitmap((Bitmap)bundle.getParcelable("signatureBitmap"));
-            this.mBitmapSavedState = bundle.getParcelable("signatureBitmap");
-            state = bundle.getParcelable("superState");
-        }
-        this.mHasEditState = false;
-        super.onRestoreInstanceState(state);
-    }
+//    @Override
+//    protected void onRestoreInstanceState(Parcelable state) {
+//        if (state instanceof Bundle) {
+//            Bundle bundle = (Bundle) state;
+//            this.setSignatureBitmap((Bitmap) bundle.getParcelable("signatureBitmap"));
+//            this.mBitmapSavedState = bundle.getParcelable("signatureBitmap");
+//            state = bundle.getParcelable("superState");
+//        }
+//        this.mHasEditState = false;
+//        super.onRestoreInstanceState(state);
+//    }
 
     /**
      * Set the pen color from a given resource.
@@ -219,22 +233,22 @@ public class SignaturePad extends View {
             case MotionEvent.ACTION_DOWN:
                 getParent().requestDisallowInterceptTouchEvent(true);
                 mPoints.clear();
-                if (isDoubleClick()) break;
+                if (mGestureDetector.onTouchEvent(event)) break;
                 mLastTouchX = eventX;
                 mLastTouchY = eventY;
                 addPoint(getNewPoint(eventX, eventY));
-                if(mOnSignedListener != null) mOnSignedListener.onStartSigning();
+                if (mOnSignedListener != null) mOnSignedListener.onStartSigning();
 
             case MotionEvent.ACTION_MOVE:
                 resetDirtyRect(eventX, eventY);
                 addPoint(getNewPoint(eventX, eventY));
+                setIsEmpty(false);
                 break;
 
             case MotionEvent.ACTION_UP:
                 resetDirtyRect(eventX, eventY);
                 addPoint(getNewPoint(eventX, eventY));
                 getParent().requestDisallowInterceptTouchEvent(true);
-                setIsEmpty(false);
                 break;
 
             default:
@@ -314,7 +328,13 @@ public class SignaturePad extends View {
 
             Canvas canvas = new Canvas(mSignatureBitmap);
             canvas.drawBitmap(signature, drawMatrix, null);
-            setIsEmpty(false);
+
+            //determine whether the passing bitmap is an empty bitmap
+            //if it is an empty bitmap, do not set mIsEmpty as false.
+            //fix the bug of nothing drew on signature pad
+            //and onRestoreInstanceState is called (for example rotate the screen to landscape)
+            //mIsEmpty set to false.
+            setIsEmpty(isBitmapEmpty(signature));
             invalidate();
         }
         // View not laid out yet e.g. called from onCreate(), onRestoreInstanceState()...
@@ -335,6 +355,12 @@ public class SignaturePad extends View {
     public Bitmap getTransparentSignatureBitmap() {
         ensureSignatureBitmap();
         return mSignatureBitmap;
+    }
+
+    //determine whether bitmap is empty
+    private boolean isBitmapEmpty(Bitmap bitmap) {
+        Bitmap emptyBitmap = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), bitmap.getConfig());
+        return bitmap.sameAs(emptyBitmap);
     }
 
     public Bitmap getTransparentSignatureBitmap(boolean trimBlankSpace) {
@@ -421,21 +447,10 @@ public class SignaturePad extends View {
         return Bitmap.createBitmap(mSignatureBitmap, xMin, yMin, xMax - xMin, yMax - yMin);
     }
 
-    private boolean isDoubleClick() {
+    private boolean onDoubleClick() {
         if (mClearOnDoubleClick) {
-            if (mFirstClick != 0 && System.currentTimeMillis() - mFirstClick > DOUBLE_CLICK_DELAY_MS) {
-                mCountClick = 0;
-            }
-            mCountClick++;
-            if (mCountClick == 1) {
-                mFirstClick = System.currentTimeMillis();
-            } else if (mCountClick == 2) {
-                long lastClick = System.currentTimeMillis();
-                if (lastClick - mFirstClick < DOUBLE_CLICK_DELAY_MS) {
-                    this.clearView();
-                    return true;
-                }
-            }
+            this.clearView();
+            return true;
         }
         return false;
     }
@@ -448,7 +463,7 @@ public class SignaturePad extends View {
             timedPoint = new TimedPoint();
         } else {
             // Get point from cache
-            timedPoint = mPointsCache.remove(mCacheSize-1);
+            timedPoint = mPointsCache.remove(mCacheSize - 1);
         }
 
         return timedPoint.set(x, y);
@@ -517,7 +532,7 @@ public class SignaturePad extends View {
         ensureSignatureBitmap();
         float originalWidth = mPaint.getStrokeWidth();
         float widthDelta = endWidth - startWidth;
-        float drawSteps = (float) Math.floor(curve.length());
+        float drawSteps = (float) Math.ceil(curve.length());
 
         for (int i = 0; i < drawSteps; i++) {
             // Calculate the Bezier (x, y) coordinate for this step.
@@ -635,13 +650,15 @@ public class SignaturePad extends View {
         }
     }
 
-    private int convertDpToPx(float dp){
+    private int convertDpToPx(float dp) {
         return Math.round(getContext().getResources().getDisplayMetrics().density * dp);
     }
 
     public interface OnSignedListener {
         void onStartSigning();
+
         void onSigned();
+
         void onClear();
     }
 
